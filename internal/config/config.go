@@ -168,7 +168,7 @@ func Load(path string) (Config, error) {
 		if u.Type == "" {
 			return Config{}, fmt.Errorf("upstreams.%s.type is required", name)
 		}
-		if u.BaseURL == "" && u.Type != "zed" {
+		if u.BaseURL == "" && u.Type != "zed" && u.Type != "tabbit" {
 			return Config{}, fmt.Errorf("upstreams.%s.base_url is required", name)
 		}
 		if u.Timeout.Duration <= 0 {

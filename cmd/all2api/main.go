@@ -18,6 +18,7 @@ import (
 
 	"github.com/lhpqaq/all2api/internal/config"
 	internalserver "github.com/lhpqaq/all2api/internal/server"
+	tabbit_auth "github.com/lhpqaq/all2api/internal/upstream/tabbit"
 	"github.com/lhpqaq/all2api/internal/upstream/zed"
 )
 
@@ -26,15 +27,23 @@ func main() {
 	flag.StringVar(&cfgPath, "config", "config.yaml", "config file path")
 
 	isLogin := false
+	var loginTarget string
+
 	if len(os.Args) > 1 && os.Args[1] == "login" {
 		isLogin = true
-		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+		if len(os.Args) > 2 {
+			loginTarget = os.Args[2]
+			os.Args = append([]string{os.Args[0]}, os.Args[3:]...)
+		} else {
+			loginTarget = "zed" // fallback default
+			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+		}
 	}
 
 	flag.Parse()
 
 	if isLogin {
-		handleLogin(cfgPath)
+		handleLogin(cfgPath, loginTarget)
 		return
 	}
 
@@ -78,9 +87,16 @@ func main() {
 	}
 }
 
-func handleLogin(cfgPath string) {
-	fmt.Println("Starting Zed OAuth Login Process...")
-	loginToken, err := zed.RunLoginCommand()
+func handleLogin(cfgPath string, target string) {
+	fmt.Printf("Starting %s Login Process...\n", target)
+	var loginToken string
+	var err error
+
+	if target == "tabbit" {
+		loginToken, err = tabbit_auth.RunLoginCommand()
+	} else {
+		loginToken, err = zed.RunLoginCommand()
+	}
 	if err != nil {
 		fmt.Printf("Login Failed: %v\n", err)
 		os.Exit(1)
@@ -88,9 +104,9 @@ func handleLogin(cfgPath string) {
 
 	fmt.Println("\n=== SUCCESS ===")
 
-	err = updateConfig(cfgPath, loginToken)
+	err = updateConfig(cfgPath, target, loginToken)
 	if err == nil {
-		fmt.Printf("Successfully updated Zed upstreams in %s\n", cfgPath)
+		fmt.Printf("Successfully updated %s upstreams in %s\n", target, cfgPath)
 	} else {
 		fmt.Printf("Warning: Failed to auto-update config file: %v\n", err)
 		fmt.Println("Please manually add the token to your upstreams.")
@@ -102,7 +118,7 @@ func handleLogin(cfgPath string) {
 	fmt.Println("---------------------------------------------------------")
 }
 
-func updateConfig(filePath string, token string) error {
+func updateConfig(filePath string, target string, token string) error {
 	b, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
@@ -139,32 +155,32 @@ func updateConfig(filePath string, token string) error {
 		return fmt.Errorf("upstreams is not mapping")
 	}
 
-	var zedIdx = -1
+	var targetIdx = -1
 	for i := 0; i < len(upms.Content); i += 2 {
-		if upms.Content[i].Value == "zed" {
-			zedIdx = i + 1
+		if upms.Content[i].Value == target {
+			targetIdx = i + 1
 			break
 		}
 	}
 
-	if zedIdx == -1 {
-		zedYaml := fmt.Sprintf(`
-type: "zed"
+	if targetIdx == -1 {
+		targetYaml := fmt.Sprintf(`
+type: "%s"
 auth:
   kind: "token"
-  token: "%s"`, token)
-		var zedNode yaml.Node
-		yaml.Unmarshal([]byte(zedYaml), &zedNode)
+  token: "%s"`, target, token)
+		var targetNode yaml.Node
+		yaml.Unmarshal([]byte(targetYaml), &targetNode)
 
 		upms.Content = append(upms.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Value: "zed"},
-			zedNode.Content[0],
+			&yaml.Node{Kind: yaml.ScalarNode, Value: target},
+			targetNode.Content[0],
 		)
 	} else {
-		zedNode := upms.Content[zedIdx]
+		targetNode := upms.Content[targetIdx]
 		var authIdx = -1
-		for i := 0; i < len(zedNode.Content); i += 2 {
-			if zedNode.Content[i].Value == "auth" {
+		for i := 0; i < len(targetNode.Content); i += 2 {
+			if targetNode.Content[i].Value == "auth" {
 				authIdx = i + 1
 				break
 			}
@@ -175,12 +191,12 @@ kind: "token"
 token: "%s"`, token)
 			var authNode yaml.Node
 			yaml.Unmarshal([]byte(authYaml), &authNode)
-			zedNode.Content = append(zedNode.Content,
+			targetNode.Content = append(targetNode.Content,
 				&yaml.Node{Kind: yaml.ScalarNode, Value: "auth"},
 				authNode.Content[0],
 			)
 		} else {
-			authNode := zedNode.Content[authIdx]
+			authNode := targetNode.Content[authIdx]
 			var tokenIdx = -1
 			for i := 0; i < len(authNode.Content); i += 2 {
 				if authNode.Content[i].Value == "token" {

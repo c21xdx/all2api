@@ -10,6 +10,7 @@ import (
 	"github.com/lhpqaq/all2api/internal/orchestrator"
 	"github.com/lhpqaq/all2api/internal/upstream"
 	"github.com/lhpqaq/all2api/internal/upstream/cursor"
+	"github.com/lhpqaq/all2api/internal/upstream/tabbit"
 	"github.com/lhpqaq/all2api/internal/upstream/zed"
 )
 
@@ -26,6 +27,7 @@ func New(cfg config.Config) (*Server, error) {
 	}
 	reg.RegisterFactory("cursor", cursor.New)
 	reg.RegisterFactory("zed", zed.New)
+	reg.RegisterFactory("tabbit", tabbit.New)
 
 	orch, err := orchestrator.New(cfg, reg)
 	if err != nil {

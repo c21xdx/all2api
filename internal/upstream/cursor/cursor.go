@@ -44,7 +44,7 @@ func (c *cursorUpstream) ListModels(ctx context.Context) ([]string, error) {
 		}
 		out = append(out, m)
 	}
-	out = append(out, "cursor")
+	// out = append(out, "cursor")
 	return out, nil
 }
 
