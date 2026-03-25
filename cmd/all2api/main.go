@@ -3,11 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,32 +23,25 @@ import (
 	"github.com/lhpqaq/all2api/internal/upstream/zed"
 )
 
+const defaultConfigPath = "config.yaml"
+
 func main() {
-	var cfgPath string
-	flag.StringVar(&cfgPath, "config", "config.yaml", "config file path")
-
-	isLogin := false
-	var loginTarget string
-
-	if len(os.Args) > 1 && os.Args[1] == "login" {
-		isLogin = true
-		if len(os.Args) > 2 {
-			loginTarget = os.Args[2]
-			os.Args = append([]string{os.Args[0]}, os.Args[3:]...)
-		} else {
-			loginTarget = "zed" // fallback default
-			os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
-		}
+	cfgPath, cfgPathProvided, args, err := parseConfigFlag(os.Args[1:])
+	if err != nil {
+		log.Fatalf("parse args: %v", err)
 	}
+	resolvedCfgPath := resolveConfigPath(cfgPath, cfgPathProvided)
 
-	flag.Parse()
-
-	if isLogin {
-		handleLogin(cfgPath, loginTarget)
+	if len(args) > 0 && args[0] == "login" {
+		loginTarget := "zed"
+		if len(args) > 1 {
+			loginTarget = args[1]
+		}
+		handleLogin(resolvedCfgPath, loginTarget)
 		return
 	}
 
-	cfg, err := config.Load(cfgPath)
+	cfg, err := config.Load(resolvedCfgPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
@@ -85,6 +79,76 @@ func main() {
 			log.Fatalf("listen: %v", err)
 		}
 	}
+}
+
+func parseConfigFlag(args []string) (cfgPath string, cfgPathProvided bool, rest []string, err error) {
+	cfgPath = defaultConfigPath
+	if v := strings.TrimSpace(os.Getenv("ALL2API_CONFIG")); v != "" {
+		cfgPath = v
+	}
+	if v := strings.TrimSpace(os.Getenv("ALL2API_CONFIG_PATH")); v != "" {
+		cfgPath = v
+	}
+
+	rest = make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := strings.TrimSpace(args[i])
+		if a == "" {
+			continue
+		}
+		if a == "-config" || a == "--config" {
+			cfgPathProvided = true
+			if i+1 >= len(args) {
+				return "", false, nil, fmt.Errorf("%s requires a value", a)
+			}
+			cfgPath = strings.TrimSpace(args[i+1])
+			i++
+			continue
+		}
+		if strings.HasPrefix(a, "-config=") {
+			cfgPathProvided = true
+			cfgPath = strings.TrimSpace(strings.TrimPrefix(a, "-config="))
+			continue
+		}
+		if strings.HasPrefix(a, "--config=") {
+			cfgPathProvided = true
+			cfgPath = strings.TrimSpace(strings.TrimPrefix(a, "--config="))
+			continue
+		}
+		rest = append(rest, args[i])
+	}
+	return cfgPath, cfgPathProvided, rest, nil
+}
+
+func resolveConfigPath(cfgPath string, cfgPathProvided bool) string {
+	cfgPath = strings.TrimSpace(cfgPath)
+	if cfgPath == "" {
+		cfgPath = defaultConfigPath
+	}
+	if cfgPathProvided {
+		return cfgPath
+	}
+
+	// Prefer common Docker and compose locations when not explicitly provided.
+	candidates := []string{
+		"/app/config/config.yaml",
+		filepath.Join("config", "config.yaml"),
+		cfgPath,
+	}
+	for _, c := range candidates {
+		if isRegularFile(c) {
+			return c
+		}
+	}
+	return cfgPath
+}
+
+func isRegularFile(path string) bool {
+	st, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return st.Mode().IsRegular()
 }
 
 func handleLogin(cfgPath string, target string) {
